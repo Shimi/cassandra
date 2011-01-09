@@ -144,7 +144,7 @@ public class CompactionsTest extends CleanupHelper
         
         final int ROWS_PER_SSTABLE = 10;
         for (int i = 0; i < ROWS_PER_SSTABLE; i++) {
-            String key = String.valueOf(i % 2);
+            String key = String.valueOf(i);
             RowMutation rm = new RowMutation(TABLE1, key);
             rm.add(new QueryPath(cfName, null, String.valueOf(i).getBytes()), new byte[0], 0);
             rm.apply();
@@ -152,7 +152,7 @@ public class CompactionsTest extends CleanupHelper
         store.forceBlockingFlush();
         
         for (int i = 0; i < ROWS_PER_SSTABLE; i++) {
-            String key = String.valueOf(i % 2);
+            String key = String.valueOf(i+ROWS_PER_SSTABLE);
             RowMutation rm = new RowMutation(TABLE1, key);
             rm.add(new QueryPath(cfName, null, String.valueOf(i).getBytes()), new byte[0], 0);
             rm.apply();
@@ -160,17 +160,13 @@ public class CompactionsTest extends CleanupHelper
         store.forceBlockingFlush();
         
         assertEquals(2, store.getSSTables().size());
-        
-        CompactionManager.instance.setMaximumCompactionThreshold(2);
+        int expectedNumOfFiles = 5;
+        CompactionManager.instance.setMaximumCompactionThreshold(3);
         CompactionManager.instance.setMinimumCompactionThreshold(2);
-        CompactionManager.instance.setMaximumSSTableSize(store.getLiveDiskSpaceUsed()/3);
+        CompactionManager.instance.setMaximumSSTableSize(store.getLiveDiskSpaceUsed()/expectedNumOfFiles);
         
-        while (true)
-        {
-            Future<Integer> ft = CompactionManager.instance.submitMinorIfNeeded(store);
-            if (ft.get() == 0)
-                break;
-        }
-        assertEquals(3, store.getSSTables().size());
+        Future<Integer> ft = CompactionManager.instance.submitMinorIfNeeded(store);
+        ft.get();
+        assertEquals(expectedNumOfFiles, store.getSSTables().size());
     }
 }

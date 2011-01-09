@@ -329,7 +329,7 @@ public class CompactionManager implements CompactionManagerMBean
                     }
                 }
                 
-                if (writer.bytesOnDisk() >= maximumSSTableSize) {
+                if (writer.getFilePointer() >= maximumSSTableSize) {
                 	SSTableReader ssTable = closeAndUpdateCache(writer, cachedKeys);
                     newSSTables.add(ssTable);
                     writer = createSSTableWriter(cfs, compactionFileLocation, expectedBloomFilterSize);
@@ -346,7 +346,7 @@ public class CompactionManager implements CompactionManagerMBean
         newSSTables.add(ssTable);
         
         cfs.replaceCompactedSSTables(sstables, newSSTables);
-        submitMinorIfNeeded(cfs);
+//        submitMinorIfNeeded(cfs);
 
         String format = "Compacted to %s.  %d/%d bytes for %d keys.  Time: %dms";
         long dTime = System.currentTimeMillis() - startTime;
