@@ -54,6 +54,8 @@ public class CompactionManager implements CompactionManagerMBean
 
     private int minimumCompactionThreshold = 4; // compact this many sstables min at a time
     private int maximumCompactionThreshold = 32; // compact this many sstables max at a time
+    
+    private long maximumSSTableSize = 5000000000l; // compact to this size. default 5GB
 
     static
     {
@@ -234,6 +236,14 @@ public class CompactionManager implements CompactionManagerMBean
         maximumCompactionThreshold = 0;
     }
 
+    public long getMaximumSSTableSize() {
+    	return maximumSSTableSize;
+    }
+    
+    public void setMaximumSSTableSize(final long maximumSSTableSize) {
+    	this.maximumSSTableSize = maximumSSTableSize;
+    }
+    
     /**
      * For internal use and testing only.  The rest of the system should go through the submit* methods,
      * which are properly serialized.
@@ -278,11 +288,13 @@ public class CompactionManager implements CompactionManagerMBean
 
         SSTableWriter writer;
         CompactionIterator ci = new CompactionIterator(cfs, sstables, gcBefore, major); // retain a handle so we can call close()
+        //iterate over non Null rows. Null row is a deleted row!
         Iterator<CompactionIterator.CompactedRow> nni = new FilterIterator(ci, PredicateUtils.notNullPredicate());
         executor.beginCompaction(cfs, ci);
 
         Map<DecoratedKey, SSTable.PositionSize> cachedKeys = new HashMap<DecoratedKey, SSTable.PositionSize>();
-
+        List<SSTableReader> newSSTables = new ArrayList<SSTableReader>();
+        
         try
         {
             if (!nni.hasNext())
@@ -294,8 +306,7 @@ public class CompactionManager implements CompactionManagerMBean
                 return 0;
             }
 
-            String newFilename = new File(compactionFileLocation, cfs.getTempSSTableFileName()).getAbsolutePath();
-            writer = new SSTableWriter(newFilename, expectedBloomFilterSize, StorageService.getPartitioner());
+            writer = createSSTableWriter(cfs, compactionFileLocation, expectedBloomFilterSize);
             while (nni.hasNext())
             {
                 CompactionIterator.CompactedRow row = nni.next();
@@ -317,6 +328,13 @@ public class CompactionManager implements CompactionManagerMBean
                         break;
                     }
                 }
+                
+                if (writer.bytesOnDisk() >= maximumSSTableSize) {
+                	SSTableReader ssTable = closeAndUpdateCache(writer, cachedKeys);
+                    newSSTables.add(ssTable);
+                    writer = createSSTableWriter(cfs, compactionFileLocation, expectedBloomFilterSize);
+                    cachedKeys = new HashMap<DecoratedKey, SSTable.PositionSize>();
+                }
             }
         }
         finally
@@ -324,17 +342,38 @@ public class CompactionManager implements CompactionManagerMBean
             ci.close();
         }
 
-        SSTableReader ssTable = writer.closeAndOpenReader();
-        cfs.replaceCompactedSSTables(sstables, Arrays.asList(ssTable));
-        for (Entry<DecoratedKey, SSTable.PositionSize> entry : cachedKeys.entrySet())
-            ssTable.cacheKey(entry.getKey(), entry.getValue());
+        SSTableReader ssTable = closeAndUpdateCache(writer, cachedKeys);
+        newSSTables.add(ssTable);
+        
+        cfs.replaceCompactedSSTables(sstables, newSSTables);
         submitMinorIfNeeded(cfs);
 
         String format = "Compacted to %s.  %d/%d bytes for %d keys.  Time: %dms";
         long dTime = System.currentTimeMillis() - startTime;
-        logger.info(String.format(format, writer.getFilename(), SSTable.getTotalBytes(sstables), ssTable.length(), totalkeysWritten, dTime));
+        logger.info(String.format(format, writer.getFilename(), SSTable.getTotalBytes(sstables),
+        		SSTable.getTotalBytes(newSSTables), totalkeysWritten, dTime));
         return sstables.size();
     }
+
+	private SSTableReader closeAndUpdateCache(SSTableWriter writer,
+			Map<DecoratedKey, SSTable.PositionSize> cachedKeys)
+			throws IOException {
+		
+		SSTableReader ssTable = writer.closeAndOpenReader();
+		for (Entry<DecoratedKey, SSTable.PositionSize> entry : cachedKeys.entrySet())
+            ssTable.cacheKey(entry.getKey(), entry.getValue());
+		
+		return ssTable;
+	}
+
+	private SSTableWriter createSSTableWriter(ColumnFamilyStore cfs,
+			String compactionFileLocation, int expectedBloomFilterSize)
+			throws IOException {
+		SSTableWriter writer;
+		String newFilename = new File(compactionFileLocation, cfs.getTempSSTableFileName()).getAbsolutePath();
+		writer = new SSTableWriter(newFilename, expectedBloomFilterSize, StorageService.getPartitioner());
+		return writer;
+	}
 
     private SSTableWriter antiCompactionHelper(ColumnFamilyStore cfs, Collection<SSTableReader> sstables, Collection<Range> ranges, InetAddress target)
             throws IOException
@@ -374,8 +413,8 @@ public class CompactionManager implements CompactionManagerMBean
                 if (writer == null)
                 {
                     FileUtils.createDirectory(compactionFileLocation);
-                    String newFilename = new File(compactionFileLocation, cfs.getTempSSTableFileName()).getAbsolutePath();
-                    writer = new SSTableWriter(newFilename, expectedBloomFilterSize, StorageService.getPartitioner());
+                    writer = createSSTableWriter(cfs, compactionFileLocation,
+							expectedBloomFilterSize);
                 }
                 writer.append(row.key, row.buffer);
                 totalKeysWritten++;

@@ -131,4 +131,46 @@ public class CompactionsTest extends CleanupHelper
         buckets = CompactionManager.getBuckets(pairs, 10); // notice the min is 10
         assertEquals(1, buckets.size());
     }
+    
+    @Test
+    public void compactionOfMaxSSTableSizeShouldSplitFiles() throws IOException, ExecutionException, InterruptedException
+    {
+        CompactionManager.instance.disableAutoCompaction();
+
+        // this test does enough rows to force multiple block indexes to be used
+        Table table = Table.open(TABLE1);
+        ColumnFamilyStore store = table.getColumnFamilyStore("Standard1");
+        String cfName = "Standard1";
+        
+        final int ROWS_PER_SSTABLE = 10;
+        for (int i = 0; i < ROWS_PER_SSTABLE; i++) {
+            String key = String.valueOf(i % 2);
+            RowMutation rm = new RowMutation(TABLE1, key);
+            rm.add(new QueryPath(cfName, null, String.valueOf(i).getBytes()), new byte[0], 0);
+            rm.apply();
+        }
+        store.forceBlockingFlush();
+        
+        for (int i = 0; i < ROWS_PER_SSTABLE; i++) {
+            String key = String.valueOf(i % 2);
+            RowMutation rm = new RowMutation(TABLE1, key);
+            rm.add(new QueryPath(cfName, null, String.valueOf(i).getBytes()), new byte[0], 0);
+            rm.apply();
+        }
+        store.forceBlockingFlush();
+        
+        assertEquals(2, store.getSSTables().size());
+        
+        CompactionManager.instance.setMaximumCompactionThreshold(2);
+        CompactionManager.instance.setMinimumCompactionThreshold(2);
+        CompactionManager.instance.setMaximumSSTableSize(store.getLiveDiskSpaceUsed()/3);
+        
+        while (true)
+        {
+            Future<Integer> ft = CompactionManager.instance.submitMinorIfNeeded(store);
+            if (ft.get() == 0)
+                break;
+        }
+        assertEquals(3, store.getSSTables().size());
+    }
 }

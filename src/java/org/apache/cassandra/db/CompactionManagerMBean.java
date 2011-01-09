@@ -59,4 +59,8 @@ public interface CompactionManagerMBean
      * @return estimated number of compactions remaining to perform
      */
     public int getPendingTasks();
+    
+    long getMaximumSSTableSize();
+    
+    void setMaximumSSTableSize(final long maximumSSTableSize);
 }
