@@ -86,6 +86,8 @@ public class NodeCmd {
                                       + "setcachecapacity <keyspace> <cfname> <keycachecapacity> <rowcachecapacity>%n"
                                       + "getcompactionthreshold%n"
                                       + "setcompactionthreshold [minthreshold] ([maxthreshold])%n"
+                                      + "getmaxsstablesize%n"
+                                      + "setmaxsstablesize [size]%n"
                                       + "streams [host]%n"
                                       + "cfhistograms <keyspace> <column_family>%n");
         String usage = String.format("java %s --host <arg> <command>%n", NodeCmd.class.getName());
@@ -615,6 +617,18 @@ public class NodeCmd {
                 System.exit(1);
             }
             probe.setCompactionThreshold(minthreshold, maxthreshold);
+        }
+        else if (cmdName.equals("setmaxsstablesize")) {
+            if (arguments.length < 1) {
+                System.err.println("Missing size value");
+                printUsage();
+                System.exit(1);
+            }
+            long size = Long.parseLong(arguments[1]);
+            probe.setMaximumSSTableSize(size);
+        }
+        else if (cmdName.equals("getmaxsstablesize")) {
+            probe.getMaximumSSTableSize();
         }
         else if (cmdName.equals("streams"))
         {

@@ -145,6 +145,10 @@ public class DatabaseDescriptor
 
     private static int indexinterval = 128;
 
+    private static int minCompactionThreshold = 4;
+	private static int maxCompactionThreshold = 32;
+    private static long maxSSTableSize = 5000000000l;
+    
     private final static String STORAGE_CONF_FILE = "storage-conf.xml";
 
     public static final int DEFAULT_ROW_CACHE_SAVE_PERIOD_IN_SECONDS = 0;
@@ -547,6 +551,22 @@ public class DatabaseDescriptor
                     throw new ConfigurationException("Index Interval must be a positive, non-zero integer.");
             }
 
+            String minCompactionThresholdStr = xmlUtils.getNodeValue("/Storage/minCompactionThreshold");
+            if (minCompactionThresholdStr != null) {
+            	minCompactionThreshold = Integer.parseInt(minCompactionThresholdStr);
+            }
+            
+            String maxCompactionThresholdStr = xmlUtils.getNodeValue("/Storage/maxCompactionThreshold");
+            if (maxCompactionThresholdStr != null) {
+            	maxCompactionThreshold = Integer.parseInt(maxCompactionThresholdStr);
+            }
+            
+            String maxSSTableSizeStr = xmlUtils.getNodeValue("/Storage/maxSSTableSize");
+            if (maxSSTableSizeStr != null) {
+            	maxSSTableSize = Long.parseLong(maxSSTableSizeStr);
+            }
+            
+            
             readTablesFromXml();
             if (tables.isEmpty())
                 throw new ConfigurationException("No keyspaces configured");
@@ -1274,4 +1294,16 @@ public class DatabaseDescriptor
     {
         return indexinterval;
     }
+    
+    public static int getMinCompactionThreshold() {
+		return minCompactionThreshold;
+	}
+
+	public static int getMaxCompactionThreshold() {
+		return maxCompactionThreshold;
+	}
+
+	public static long getMaxSSTableSize() {
+		return maxSSTableSize;
+	}
 }

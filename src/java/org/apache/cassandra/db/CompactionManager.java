@@ -46,6 +46,10 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
+import com.google.common.base.Function;
+import com.google.common.base.Joiner;
+import com.google.common.collect.Collections2;
+
 public class CompactionManager implements CompactionManagerMBean
 {
     public static final String MBEAN_OBJECT_NAME = "org.apache.cassandra.db:type=CompactionManager";
@@ -60,6 +64,11 @@ public class CompactionManager implements CompactionManagerMBean
     static
     {
         instance = new CompactionManager();
+        
+        instance.setMinimumCompactionThreshold(DatabaseDescriptor.getMinCompactionThreshold());
+        instance.setMaximumCompactionThreshold(DatabaseDescriptor.getMaxCompactionThreshold());
+        instance.setMaximumSSTableSize(DatabaseDescriptor.getMaxSSTableSize());
+        
         MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
         try
         {
@@ -69,6 +78,7 @@ public class CompactionManager implements CompactionManagerMBean
         {
             throw new RuntimeException(e);
         }
+        
     }
 
     private CompactionExecutor executor = new CompactionExecutor();
@@ -293,7 +303,7 @@ public class CompactionManager implements CompactionManagerMBean
         executor.beginCompaction(cfs, ci);
 
         Map<DecoratedKey, SSTable.PositionSize> cachedKeys = new HashMap<DecoratedKey, SSTable.PositionSize>();
-        List<SSTableReader> newSSTables = new ArrayList<SSTableReader>();
+        Map<SSTableReader, Map<DecoratedKey, SSTable.PositionSize>> sstableToKeyCache = new HashMap<SSTableReader, Map<DecoratedKey, SSTable.PositionSize>>();
         
         try
         {
@@ -330,8 +340,8 @@ public class CompactionManager implements CompactionManagerMBean
                 }
                 
                 if (writer.getFilePointer() >= maximumSSTableSize) {
-                	SSTableReader ssTable = closeAndUpdateCache(writer, cachedKeys);
-                    newSSTables.add(ssTable);
+                	SSTableReader ssTable = writer.closeAndOpenReader();
+                	sstableToKeyCache.put(ssTable, cachedKeys);
                     writer = createSSTableWriter(cfs, compactionFileLocation, expectedBloomFilterSize);
                     cachedKeys = new HashMap<DecoratedKey, SSTable.PositionSize>();
                 }
@@ -342,28 +352,54 @@ public class CompactionManager implements CompactionManagerMBean
             ci.close();
         }
 
-        SSTableReader ssTable = closeAndUpdateCache(writer, cachedKeys);
-        newSSTables.add(ssTable);
+        SSTableReader ssTable = writer.closeAndOpenReader();
+        sstableToKeyCache.put(ssTable, cachedKeys);
         
-        cfs.replaceCompactedSSTables(sstables, newSSTables);
+        replaceFilesAndUpdateCache(cfs, sstables, sstableToKeyCache, ssTable);
+        
 //        submitMinorIfNeeded(cfs);
 
-        String format = "Compacted to %s.  %d/%d bytes for %d keys.  Time: %dms";
-        long dTime = System.currentTimeMillis() - startTime;
-        logger.info(String.format(format, writer.getFilename(), SSTable.getTotalBytes(sstables),
-        		SSTable.getTotalBytes(newSSTables), totalkeysWritten, dTime));
+        logSummary(sstables, startTime, totalkeysWritten, sstableToKeyCache);
+        
         return sstables.size();
     }
 
-	private SSTableReader closeAndUpdateCache(SSTableWriter writer,
-			Map<DecoratedKey, SSTable.PositionSize> cachedKeys)
-			throws IOException {
+	private void logSummary(Collection<SSTableReader> sstables, long startTime, long totalkeysWritten,
+			Map<SSTableReader, Map<DecoratedKey, SSTable.PositionSize>> sstableToKeyCache) {
 		
-		SSTableReader ssTable = writer.closeAndOpenReader();
-		for (Entry<DecoratedKey, SSTable.PositionSize> entry : cachedKeys.entrySet())
-            ssTable.cacheKey(entry.getKey(), entry.getValue());
+		Set<SSTableReader> newSSTables = sstableToKeyCache.keySet();
 		
-		return ssTable;
+		Collection<String> names = Collections2.transform(newSSTables, new Function<SSTableReader, String>() {
+			@Override
+			public String apply(SSTableReader sstable) {
+				return sstable.getFilename();
+			}
+		});
+		
+		String formatedNames = Joiner.on(" ").join(names);
+		
+        String format = "Compacted to %s.  %d/%d bytes for %d keys.  Time: %dms";
+        long dTime = System.currentTimeMillis() - startTime;
+        
+        logger.info(String.format(format, formatedNames, SSTable.getTotalBytes(sstables),
+        		SSTable.getTotalBytes(newSSTables), totalkeysWritten, dTime));
+	}
+
+	private void replaceFilesAndUpdateCache(
+			ColumnFamilyStore cfs,
+			Collection<SSTableReader> sstables,
+			Map<SSTableReader, Map<DecoratedKey, SSTable.PositionSize>> sstableToKeyCache,
+			SSTableReader ssTable) throws IOException {
+		
+		Set<SSTableReader> newSSTables = sstableToKeyCache.keySet();
+        cfs.replaceCompactedSSTables(sstables, newSSTables);
+        
+        for (SSTable sstable : newSSTables) {
+        	Map<DecoratedKey, SSTable.PositionSize> cachedKeys = sstableToKeyCache.get(sstable);
+        	for (Entry<DecoratedKey, SSTable.PositionSize> entry : cachedKeys.entrySet()) {
+                ssTable.cacheKey(entry.getKey(), entry.getValue());
+        	}
+		}
 	}
 
 	private SSTableWriter createSSTableWriter(ColumnFamilyStore cfs,

@@ -410,4 +410,21 @@
    ~ See http://wiki.apache.org/cassandra/ReadRepair
   -->
   <DoConsistencyChecksBoolean>true</DoConsistencyChecksBoolean>
+  
+  <!--
+   ~ Set Min compaction threshold. The default is 4
+   -->
+  <!-- <minCompactionThreshold></minCompactionThreshold>  -->
+  
+  <!--
+   ~ Set Max compaction threshold. The default is 32
+   -->
+  <!-- <maxCompactionThreshold></maxCompactionThreshold>  -->
+  
+  <!--
+   ~ Set Max SSTable size in bytes. Compaction will not create files which are bigger.
+   ~ default size is 5000000000 = 5GB
+   -->
+  <!-- <maxSSTableSize></maxSSTableSize>  -->
+  
 </Storage>

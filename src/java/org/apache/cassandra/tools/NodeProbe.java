@@ -416,6 +416,16 @@ public class NodeProbe
              mcmProxy.setMaximumCompactionThreshold(maximumCompactionThreshold);
         }
     }
+    
+    public void setMaximumSSTableSize(long maxSize) {
+        if (maxSize >= 0) {
+        	mcmProxy.setMaximumSSTableSize(maxSize);
+        }
+    }
+    
+    public void getMaximumSSTableSize(PrintStream outs) {
+    	outs.println("Current Max SSTable size: " +  mcmProxy.getMaximumSSTableSize());
+    }
 
     public void setCacheCapacities(String tableName, String cfName, int keyCacheCapacity, int rowCacheCapacity)
     {
